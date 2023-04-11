@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -41,6 +42,10 @@ var (
 type httpErrorResp struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+}
+
+type requestID struct {
+	requestID uint64
 }
 
 // AuctionTranscript is the bid and blinded block received from the relay send to the relay monitor
@@ -81,8 +86,10 @@ type BoostService struct {
 	httpClientRegVal     http.Client
 	requestMaxRetries    int
 
-	bidsLock sync.Mutex
-	bids     map[bidRespKey]bidResp // keeping track of bids, to log the originating relay on withholding
+	bidsLock  sync.Mutex
+	bids      map[bidRespKey]bidResp // keeping track of bids, to log the originating relay on withholding
+	reqIDLock sync.Mutex
+	reqID     requestID // 18446744073709551616 unique values which would have a collision every XYZ days if all 1mil validators were using mev-boost
 }
 
 // NewBoostService created a new BoostService
@@ -322,6 +329,8 @@ func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request)
 	result := bidResp{}                           // the final response, containing the highest bid (if any)
 	relays := make(map[BlockHashHex][]RelayEntry) // relays that sent the bid for a specific blockHash
 
+	reqID := m.newReqID() // optional request ID to correlate getHeader and getPayload
+
 	// Call the relays
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -333,7 +342,7 @@ func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request)
 			url := relay.GetURI(path)
 			log := log.WithField("url", url)
 			responsePayload := new(GetHeaderResponse)
-			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, UserAgent(req.Header.Get("User-Agent")), nil, responsePayload)
+			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, UserAgent(req.Header.Get("User-Agent")), reqID, responsePayload)
 			if err != nil {
 				log.WithError(err).Warn("error making request to relay")
 				return
@@ -744,4 +753,14 @@ func (m *BoostService) CheckRelays() int {
 	// At the end, wait for every routine and return status according to relay's ones.
 	wg.Wait()
 	return int(numSuccessRequestsToRelay)
+}
+
+// newReqID generates, stores, and returns a random request ID to correlate getHeader and getPayload
+func (m *BoostService) newReqID() requestID {
+	reqID := requestID{rand.Uint64()}
+	m.reqIDLock.Lock()
+	defer m.reqIDLock.Unlock()
+	m.reqID = reqID
+
+	return reqID
 }
