@@ -44,10 +44,6 @@ type httpErrorResp struct {
 	Message string `json:"message"`
 }
 
-type requestID struct {
-	requestID uint64
-}
-
 // AuctionTranscript is the bid and blinded block received from the relay send to the relay monitor
 type AuctionTranscript struct {
 	Bid        *SignedBuilderBid               `json:"bid"`
@@ -89,7 +85,7 @@ type BoostService struct {
 	bidsLock  sync.Mutex
 	bids      map[bidRespKey]bidResp // keeping track of bids, to log the originating relay on withholding
 	reqIDLock sync.Mutex
-	reqID     requestID // 18446744073709551616 unique values which would have a collision every XYZ days if all 1mil validators were using mev-boost
+	reqID     uint64 // 18446744073709551616 unique values which would have a collision every XYZ days if all 1mil validators were using mev-boost
 }
 
 // NewBoostService created a new BoostService
@@ -208,7 +204,7 @@ func (m *BoostService) sendValidatorRegistrationsToRelayMonitors(payload []types
 		go func(relayMonitor *url.URL) {
 			url := GetURI(relayMonitor, pathRegisterValidator)
 			log = log.WithField("url", url)
-			_, err := SendHTTPRequest(context.Background(), m.httpClientRegVal, http.MethodPost, url, "", payload, nil)
+			_, err := SendHTTPRequest(context.Background(), m.httpClientRegVal, http.MethodPost, url, "", payload, nil, 0)
 			if err != nil {
 				log.WithError(err).Warn("error calling registerValidator on relay monitor")
 				return
@@ -224,7 +220,7 @@ func (m *BoostService) sendAuctionTranscriptToRelayMonitors(transcript *AuctionT
 		go func(relayMonitor *url.URL) {
 			url := GetURI(relayMonitor, pathAuctionTranscript)
 			log := log.WithField("url", url)
-			_, err := SendHTTPRequest(context.Background(), *http.DefaultClient, http.MethodPost, url, UserAgent(""), transcript, nil)
+			_, err := SendHTTPRequest(context.Background(), *http.DefaultClient, http.MethodPost, url, UserAgent(""), transcript, nil, 0)
 			if err != nil {
 				log.WithError(err).Warn("error sending auction transcript to relay monitor")
 				return
@@ -274,7 +270,7 @@ func (m *BoostService) handleRegisterValidator(w http.ResponseWriter, req *http.
 			url := relay.GetURI(pathRegisterValidator)
 			log := log.WithField("url", url)
 
-			_, err := SendHTTPRequest(context.Background(), m.httpClientRegVal, http.MethodPost, url, ua, payload, nil)
+			_, err := SendHTTPRequest(context.Background(), m.httpClientRegVal, http.MethodPost, url, ua, payload, nil, 0)
 			relayRespCh <- err
 			if err != nil {
 				log.WithError(err).Warn("error calling registerValidator on relay")
@@ -342,7 +338,7 @@ func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request)
 			url := relay.GetURI(path)
 			log := log.WithField("url", url)
 			responsePayload := new(GetHeaderResponse)
-			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, UserAgent(req.Header.Get("User-Agent")), reqID, responsePayload)
+			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, UserAgent(req.Header.Get("User-Agent")), reqID, responsePayload, reqID)
 			if err != nil {
 				log.WithError(err).Warn("error making request to relay")
 				return
@@ -756,8 +752,8 @@ func (m *BoostService) CheckRelays() int {
 }
 
 // newReqID generates, stores, and returns a random request ID to correlate getHeader and getPayload
-func (m *BoostService) newReqID() requestID {
-	reqID := requestID{rand.Uint64()}
+func (m *BoostService) newReqID() uint64 {
+	reqID := rand.Uint64()
 	m.reqIDLock.Lock()
 	defer m.reqIDLock.Unlock()
 	m.reqID = reqID

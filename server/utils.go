@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,7 +39,7 @@ type UserAgent string
 type BlockHashHex string
 
 // SendHTTPRequest - prepare and send HTTP request, marshaling the payload if any, and decoding the response if dst is set
-func SendHTTPRequest(ctx context.Context, client http.Client, method, url string, userAgent UserAgent, payload, dst any) (code int, err error) {
+func SendHTTPRequest(ctx context.Context, client http.Client, method, url string, userAgent UserAgent, payload, dst any, reqID uint64) (code int, err error) {
 	var req *http.Request
 
 	if payload == nil {
@@ -59,6 +60,11 @@ func SendHTTPRequest(ctx context.Context, client http.Client, method, url string
 
 	// Set user agent
 	req.Header.Set("User-Agent", strings.TrimSpace(fmt.Sprintf("mev-boost/%s %s", config.Version, userAgent)))
+
+	// Set Req ID
+	if reqID != 0 {
+		req.Header.Set("Boost-Request-Id", strconv.FormatUint(reqID, 10))
+	}
 
 	// Execute request
 	resp, err := client.Do(req)
